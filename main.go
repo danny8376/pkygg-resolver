@@ -16,19 +16,40 @@ import (
     "github.com/yggdrasil-network/yggdrasil-go/src/address"
 )
 
-var defaultListen = []string{
-    "udp:[::]:53",
-    "tcp:[::]:53",
-}
+const zone = "pk.ygg."
+const suffix = "." + zone
+
+var (
+    defaultListen = []string{
+        "udp:[::]:53",
+        "tcp:[::]:53",
+    }
+    defaultNS = []string{
+        "ns"+suffix+":200::",
+    }
+)
+
+const (
+    defaultRname = "go-issue-at-github-com-danny8376-ygg-resolver.not.really.email.invalid."
+)
 
 var (
     listen      = pflag.StringSlice("listen", defaultListen, "listen string in proto:addr:port format")
+    rname       = pflag.String("rname", defaultRname, "RNAME in SOA response")
+    ns          = pflag.StringSlice("ns", defaultNS, "NS response in either fqdn or fqdn:glue-ip format, first one will be master in SOA response")
     compress    = pflag.Bool("compress", true, "compress replies")
     soreuseport = pflag.Int("soreuseport", 0, "use SO_REUSE_PORT")
     cpu         = pflag.Int("cpu", 0, "number of cpu to use")
 )
 
-const suffix = ".pk.ygg."
+func splitAtColon(str string) (string, string) {
+    split := strings.SplitN(str, ":", 2)
+    if len(split) == 1 {
+        return split[0], ""
+    } else {
+        return split[0], split[1]
+    }
+}
 
 func handle(w dns.ResponseWriter, r *dns.Msg) {
     var (
@@ -45,6 +66,41 @@ func handle(w dns.ResponseWriter, r *dns.Msg) {
         return
     }
     q := r.Question[0]
+    if q.Name == zone {
+        switch q.Qtype {
+        case dns.TypeSOA:
+            mns, _ := splitAtColon((*ns)[0])
+            rr = &dns.SOA{
+                Hdr:     dns.RR_Header{Name: q.Name, Rrtype: dns.TypeSOA, Class: dns.ClassINET, Ttl: 86400},
+                Ns:      mns,
+                Mbox:    *rname,
+                Serial:  200,
+                Refresh: 86400,
+                Retry:   7200,
+                Expire:  2592000,
+                Minttl:  2592000,
+            }
+            m.Answer = append(m.Answer, rr)
+        case dns.TypeNS:
+            for _, i := range *ns {
+                n, a := splitAtColon(i)
+                rr = &dns.NS{
+                    Hdr: dns.RR_Header{Name: zone, Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 86400},
+                    Ns:  n,
+                }
+                m.Answer = append(m.Answer, rr)
+                if a != "" {
+                    rr = &dns.AAAA{
+                        Hdr:  dns.RR_Header{Name: n, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 86400},
+                        AAAA: net.ParseIP(a),
+                    }
+                    m.Extra = append(m.Extra, rr)
+                }
+            }
+        }
+        w.WriteMsg(m)
+        return
+    }
     if q.Qtype != dns.TypeAAAA {
         w.WriteMsg(m)
         return
@@ -78,9 +134,9 @@ func handle(w dns.ResponseWriter, r *dns.Msg) {
 func serve(soreuseport bool) {
     for _, l := range *listen {
         go func() {
-            var split = strings.SplitN(l, ":", 2)
-            println("Listening on "+split[0]+" "+split[1])
-            server := &dns.Server{Addr: split[1], Net: split[0], TsigSecret: nil, ReusePort: soreuseport}
+            net, addr := splitAtColon(l)
+            println("Listening on "+net+" "+addr)
+            server := &dns.Server{Addr: addr, Net: net, TsigSecret: nil, ReusePort: soreuseport}
             if err := server.ListenAndServe(); err != nil {
                 fmt.Printf("Failed to setup "+l+" server: %s\n", err.Error())
             }
