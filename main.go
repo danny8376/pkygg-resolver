@@ -133,14 +133,14 @@ func handle(w dns.ResponseWriter, r *dns.Msg) {
 
 func serve(soreuseport bool) {
     for _, l := range *listen {
-        go func() {
+        go func(l string) {
             net, addr := splitAtColon(l)
             println("Listening on "+net+" "+addr)
             server := &dns.Server{Addr: addr, Net: net, TsigSecret: nil, ReusePort: soreuseport}
             if err := server.ListenAndServe(); err != nil {
                 fmt.Printf("Failed to setup "+l+" server: %s\n", err.Error())
             }
-        }()
+        }(l)
     }
 }
 
