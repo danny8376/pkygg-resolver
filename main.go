@@ -2,6 +2,7 @@ package main
 
 import (
     "crypto/ed25519"
+    "encoding/base32"
     "encoding/hex"
     "fmt"
     "net"
@@ -42,6 +43,10 @@ var (
     compress    = pflag.Bool("compress", true, "compress replies")
     soreuseport = pflag.Int("soreuseport", 0, "use SO_REUSE_PORT")
     cpu         = pflag.Int("cpu", 0, "number of cpu to use")
+)
+
+var (
+    b32 = base32.StdEncoding.WithPadding(base32.NoPadding)
 )
 
 func splitAtColon(str string) (string, string) {
@@ -106,7 +111,7 @@ func handle(w dns.ResponseWriter, r *dns.Msg) {
         w.WriteMsg(m)
         return
     }
-    if a, ok := nsList.Get(q.Name); ok {
+    if a, glue := nsList.Get(q.Name); glue {
         rr = &dns.AAAA{
             Hdr:  dns.RR_Header{Name: zone, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 86400},
             AAAA: a,
@@ -122,16 +127,33 @@ func handle(w dns.ResponseWriter, r *dns.Msg) {
         return
     }
     */
-    pkstr := strings.TrimSuffix(q.Name, suffix)
-    pkstr = pkstr[strings.LastIndex(pkstr, ".")+1:]
-    if len(pkstr) % 2 == 1 { // make hex decode below happy
-        pkstr = pkstr + "0"
-    }
     var pk [ed25519.PublicKeySize]byte
-    if b, err := hex.DecodeString(pkstr); err != nil {
+    nxdomain := false
+    subname := strings.TrimSuffix(q.Name, suffix)
+    labels := strings.Split(subname, ".")
+    pkstr := labels[len(labels)-1]
+    switch pkstr {
+    // while this is valid partial hex... will anyone ever try to use this?
+    case "b32":
+        pkstr = labels[len(labels)-2]
+        if b, err := b32.DecodeString(pkstr); err != nil {
+            nxdomain = true
+        } else {
+            copy(pk[:], b)
+        }
+    default: // normal hex
+        if len(pkstr) % 2 == 1 { // make hex decode below happy
+            pkstr = pkstr + "0"
+        }
+        if b, err := hex.DecodeString(pkstr); err != nil {
+            nxdomain = true
+        } else {
+            copy(pk[:], b)
+        }
+    }
+    if nxdomain {
         m.Rcode = dns.RcodeNameError
     } else {
-        copy(pk[:], b)
         rr = &dns.AAAA{
             Hdr:  dns.RR_Header{Name: q.Name, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 86400},
             AAAA: net.IP(address.AddrForKey(pk[:])[:]),
