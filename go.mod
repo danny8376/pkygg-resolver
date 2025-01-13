@@ -3,6 +3,7 @@ module github.com/danny8376/pkygg-resolver
 go 1.23.4
 
 require (
+	github.com/elliotchance/orderedmap/v2 v2.7.0 // indirect
 	github.com/miekg/dns v1.1.62 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/yggdrasil-network/yggdrasil-go v0.5.12 // indirect

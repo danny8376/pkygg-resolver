@@ -12,6 +12,7 @@ import (
     "syscall"
 
     "github.com/spf13/pflag"
+    "github.com/elliotchance/orderedmap/v2"
     "github.com/miekg/dns"
     "github.com/yggdrasil-network/yggdrasil-go/src/address"
 )
@@ -27,6 +28,7 @@ var (
     defaultNS = []string{
         "ns"+suffix+":200::",
     }
+    nsList = orderedmap.NewOrderedMap[string, net.IP]()
 )
 
 const (
@@ -82,17 +84,16 @@ func handle(w dns.ResponseWriter, r *dns.Msg) {
             }
             m.Answer = append(m.Answer, rr)
         case dns.TypeNS:
-            for _, i := range *ns {
-                n, a := splitAtColon(i)
+            for n, a := range nsList.Iterator() {
                 rr = &dns.NS{
                     Hdr: dns.RR_Header{Name: zone, Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 86400},
                     Ns:  n,
                 }
                 m.Answer = append(m.Answer, rr)
-                if a != "" {
+                if a != nil {
                     rr = &dns.AAAA{
                         Hdr:  dns.RR_Header{Name: n, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 86400},
-                        AAAA: net.ParseIP(a),
+                        AAAA: a,
                     }
                     m.Extra = append(m.Extra, rr)
                 }
@@ -102,6 +103,15 @@ func handle(w dns.ResponseWriter, r *dns.Msg) {
         return
     }
     if q.Qtype != dns.TypeAAAA {
+        w.WriteMsg(m)
+        return
+    }
+    if a, ok := nsList.Get(q.Name); ok {
+        rr = &dns.AAAA{
+            Hdr:  dns.RR_Header{Name: zone, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 86400},
+            AAAA: a,
+        }
+        m.Answer = append(m.Answer, rr)
         w.WriteMsg(m)
         return
     }
@@ -151,6 +161,15 @@ func main() {
     pflag.Parse()
     if *cpu != 0 {
         runtime.GOMAXPROCS(*cpu)
+    }
+    // TODO: properly verify ns items
+    for _, i := range *ns {
+        n, a := splitAtColon(i)
+        if a == "" {
+            nsList.Set(n, nil)
+        } else {
+            nsList.Set(n, net.ParseIP(a))
+        }
     }
     dns.HandleFunc("pk.ygg.", handle)
     if *soreuseport > 0 {
