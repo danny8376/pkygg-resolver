@@ -89,7 +89,8 @@ func handle(w dns.ResponseWriter, r *dns.Msg) {
             }
             m.Answer = append(m.Answer, rr)
         case dns.TypeNS:
-            for n, a := range nsList.Iterator() {
+            for el := nsList.Front(); el != nil; el = el.Next() {
+                n, a := el.Key, el.Value
                 rr = &dns.NS{
                     Hdr: dns.RR_Header{Name: zone, Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 86400},
                     Ns:  n,
