@@ -136,7 +136,7 @@ func handle(w dns.ResponseWriter, r *dns.Msg) {
     switch pkstr {
     // while this is valid partial hex... will anyone ever try to use this?
     case "b32":
-        pkstr = labels[len(labels)-2]
+        pkstr = strings.ToUpper(labels[len(labels)-2])
         if b, err := b32.DecodeString(pkstr); err != nil {
             nxdomain = true
         } else {
